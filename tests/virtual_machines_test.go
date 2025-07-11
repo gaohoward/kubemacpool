@@ -86,6 +86,33 @@ var _ = Describe("[rfe_id:3503][crit:medium][vendor:cnv-qe@redhat.com][level:com
 		AfterEach(func() {
 			Expect(checkKubemacpoolCrash()).To(Succeed(), "Kubemacpool should not crash during test")
 		})
+
+		Context("When migration with same mac addresses", func() {
+			It("special treatment of conflicting mac addresses in vm migration", func() {
+				vm1 := CreateVMObject(TestNamespace, []kubevirtv1.Interface{newInterface("br1", "02:00:00:00:00:01")}, []kubevirtv1.Network{newNetwork("br1")})
+				strategyAlways := kubevirtv1.RunStrategyAlways
+				vm1.Spec.RunStrategy = &strategyAlways
+
+				vm2 := CreateVMObject(OtherTestNamespace, []kubevirtv1.Interface{newInterface("br1", "02:00:00:00:00:01")}, []kubevirtv1.Network{newNetwork("br1")})
+				strategyReceiver := kubevirtv1.RunStrategyWaitAsReceiver
+				vm2.Spec.RunStrategy = &strategyReceiver
+
+				vm3 := CreateVMObject(OtherTestNamespace, []kubevirtv1.Interface{newInterface("br1", "02:00:00:00:00:01")}, []kubevirtv1.Network{newNetwork("br1")})
+				vm3.Spec.RunStrategy = &strategyReceiver
+
+				_, err := testClient.VirtClient.VirtualMachine(vm1.Namespace).Create(context.TODO(), vm1, metav1.CreateOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				_, err = testClient.VirtClient.VirtualMachine(vm2.Namespace).Create(context.TODO(), vm2, metav1.CreateOptions{})
+				Expect(err).ToNot(HaveOccurred())
+
+				_, err = testClient.VirtClient.VirtualMachine(vm3.Namespace).Create(context.TODO(), vm3, metav1.CreateOptions{})
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(ContainSubstring("failed to allocate requested mac address"))
+			})
+
+		})
+
 		Context("When Running with default opt-mode configuration", func() {
 			BeforeEach(func() {
 				By("Getting the current VM Opt-mode")

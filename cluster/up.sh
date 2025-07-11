@@ -26,7 +26,7 @@ CNAO_VERSION=v0.76.1
 export KUBEVIRT_DEPLOY_PROMETHEUS=true
 
 #use kubevirt latest z stream release
-KUBEVIRT_VERSION=$(getLatestPatchVersion v1.2)
+KUBEVIRT_VERSION=$(getLatestPatchVersion v1.5)
 cluster::install
 
 if [[ "$KUBEVIRT_PROVIDER" != external ]]; then
@@ -44,7 +44,9 @@ fi
 
 
 # deploy kubevirt
-./cluster/kubectl.sh apply -f https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-operator.yaml
+# hack: to use the latest kubevirt you need to build the kubevirt on main and generate the manifests
+# and directly deploy the kubevirt operator and cr.
+./cluster/kubectl.sh apply -f /root/hgao/project/kubevirt/kubevirt/_out/manifests/release/kubevirt-operator.yaml
 
 # Ensure the KubeVirt CRD is created
 count=0
@@ -54,7 +56,8 @@ until ./cluster/kubectl.sh get crd kubevirts.kubevirt.io; do
     sleep 1
 done
 
-./cluster/kubectl.sh apply -f https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/kubevirt-cr.yaml
+# hack: build and generate manifests first from kubevirt and then deploy directly
+./cluster/kubectl.sh apply -f /root/hgao/project/kubevirt/kubevirt/_out/manifests/release/kubevirt-cr.yaml
 
 # Ensure the KubeVirt CR is created
 count=0

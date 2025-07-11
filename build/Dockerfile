@@ -2,13 +2,13 @@ ARG BUILD_ARCH=amd64
 FROM --platform=linux/${BUILD_ARCH} quay.io/centos/centos:stream9 AS builder
 ARG TARGETOS
 ARG TARGETARCH
-ENV TARGETOS=${TARGETOS:-linux}
-ENV TARGETARCH=${TARGETARCH:-amd64}
+ENV TARGETOS=linux
+ENV TARGETARCH=amd64
 
 ARG BUILDOS
 ARG BUILDARCH
-ENV BUILDOS=${BUILDOS:-linux}
-ENV BUILDARCH=${BUILDARCH:-amd64}
+ENV BUILDOS=linux
+ENV BUILDARCH=amd64
 
 WORKDIR /go/src/kubemacpool
 RUN dnf install -y wget && dnf clean all
@@ -26,6 +26,6 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build -o build/_output/bin/manager github.com/k8snetworkplumbingwg/kubemacpool/cmd/manager
 
 # Copy the controller-manager into a thin image
-FROM --platform=linux/${TARGETARCH} registry.access.redhat.com/ubi9/ubi-minimal
+FROM --platform=linux/amd64 registry.access.redhat.com/ubi9/ubi-minimal
 COPY --from=builder /go/src/kubemacpool/build/_output/bin/manager /
 ENTRYPOINT ["/manager"]

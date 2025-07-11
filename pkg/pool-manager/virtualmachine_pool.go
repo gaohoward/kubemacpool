@@ -76,7 +76,7 @@ func (p *PoolManager) AllocateVirtualMachineMac(virtualMachine *kubevirt.Virtual
 		}
 
 		if iface.MacAddress != "" {
-			if err := p.allocateRequestedVirtualMachineInterfaceMac(vmFullName, iface, isNotDryRun, logger); err != nil {
+			if err := p.allocateRequestedVirtualMachineInterfaceMac(virtualMachine.Spec.RunStrategy, vmFullName, iface, isNotDryRun, logger); err != nil {
 				p.revertAllocationOnVm(vmFullName, newAllocations, isNotDryRun)
 
 				return err
@@ -164,7 +164,7 @@ func (p *PoolManager) UpdateMacAddressesForVirtualMachine(previousVirtualMachine
 				newAllocations[requestIface.Name] = currentlyAllocatedMacAddress
 			} else if NewMacKey(requestIface.MacAddress).String() != currentlyAllocatedMacAddress {
 				// Specific mac address was requested
-				err := p.allocateRequestedVirtualMachineInterfaceMac(vmFullName, requestIface, isNotDryRun, logger)
+				err := p.allocateRequestedVirtualMachineInterfaceMac(virtualMachine.Spec.RunStrategy, vmFullName, requestIface, isNotDryRun, logger)
 				if err != nil {
 					p.revertAllocationOnVm(vmFullName, newAllocations, isNotDryRun)
 					return err
@@ -176,7 +176,7 @@ func (p *PoolManager) UpdateMacAddressesForVirtualMachine(previousVirtualMachine
 
 		} else {
 			if requestIface.MacAddress != "" {
-				if err := p.allocateRequestedVirtualMachineInterfaceMac(vmFullName, requestIface, isNotDryRun, logger); err != nil {
+				if err := p.allocateRequestedVirtualMachineInterfaceMac(virtualMachine.Spec.RunStrategy, vmFullName, requestIface, isNotDryRun, logger); err != nil {
 					p.revertAllocationOnVm(vmFullName, newAllocations, isNotDryRun)
 					return err
 				}
@@ -240,7 +240,7 @@ func (p *PoolManager) allocateFromPoolForVirtualMachine(vmFullName string, iface
 	return macAddr.String(), nil
 }
 
-func (p *PoolManager) allocateRequestedVirtualMachineInterfaceMac(vmFullName string, iface kubevirt.Interface, isNotDryRun bool, parentLogger logr.Logger) error {
+func (p *PoolManager) allocateRequestedVirtualMachineInterfaceMac(inRunStrategy *kubevirt.VirtualMachineRunStrategy, vmFullName string, iface kubevirt.Interface, isNotDryRun bool, parentLogger logr.Logger) error {
 	logger := parentLogger.WithName("allocateRequestedVirtualMachineInterfaceMac")
 	requestedMac := iface.MacAddress
 	if _, err := net.ParseMAC(requestedMac); err != nil {
@@ -249,11 +249,13 @@ func (p *PoolManager) allocateRequestedVirtualMachineInterfaceMac(vmFullName str
 
 	if macEntry, exist := p.macPoolMap[NewMacKey(requestedMac)]; exist {
 		if !macAlreadyBelongsToVmAndInterface(vmFullName, iface.Name, macEntry) {
-			err := fmt.Errorf("failed to allocate requested mac address")
-			logger.Error(err, fmt.Sprintf("mac address %s already allocated to %s, %s, conflict with: %s, %s",
-				iface.MacAddress, macEntry.instanceName, macEntry.macInstanceKey, vmFullName, iface.Name))
+			if !p.isMacCollisionAllowed(macEntry.instanceName, inRunStrategy) {
+				err := fmt.Errorf("failed to allocate requested mac address")
+				logger.Error(err, fmt.Sprintf("mac address %s already allocated to %s, %s, conflict with: %s, %s",
+					iface.MacAddress, macEntry.instanceName, macEntry.macInstanceKey, vmFullName, iface.Name))
 
-			return err
+				return err
+			}
 		}
 	}
 
@@ -262,6 +264,28 @@ func (p *PoolManager) allocateRequestedVirtualMachineInterfaceMac(vmFullName str
 	}
 	logger.V(1).Info("requested mac was allocated for virtual machine", "requestedMap", requestedMac)
 	return nil
+}
+
+func (p *PoolManager) isMacCollisionAllowed(existingvm string, inRunStrategy *kubevirt.VirtualMachineRunStrategy) bool {
+	if inRunStrategy == nil || *inRunStrategy != kubevirt.RunStrategyWaitAsReceiver {
+		log.Info("RunStrategy is not WaitAsReceiver, disallow duplicate mac address")
+		return false
+	}
+
+	vm1, err1 := p.getvmInstance(existingvm)
+	if err1 != nil {
+		log.Info("failed to get vm1 instance", "existingvm", existingvm, "error", err1)
+		return false
+	}
+
+	// if existing vm has WaitAsReceiver too, disallow duplicate mac address
+	if vm1.Spec.RunStrategy != nil && *vm1.Spec.RunStrategy == kubevirt.RunStrategyWaitAsReceiver {
+		log.Info("another vm with same mac address also has WaitAsReceiver RunStrategy", "vm", vm1.Name)
+		return false
+	}
+
+	log.Info("RunStrategy is WaitAsReceiver, allowing duplicate mac address", "existingvm", existingvm, "vm1", vm1.Name)
+	return true
 }
 
 func macAlreadyBelongsToVmAndInterface(vmFullName, interfaceName string, macEntry macEntry) bool {
@@ -296,7 +320,7 @@ func (p *PoolManager) initMacMapFromCluster(parentLogger logr.Logger) error {
 		}
 
 		if iface.MacAddress != "" {
-			if err := p.allocateRequestedVirtualMachineInterfaceMac(vmFullName, iface, true, parentLogger); err != nil {
+			if err := p.allocateRequestedVirtualMachineInterfaceMac(nil, vmFullName, iface, true, parentLogger); err != nil {
 				if strings.Contains(err.Error(), "failed to allocate requested mac address") {
 					gauges.DuplicateMacGauge.Inc()
 				}
